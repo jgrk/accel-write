@@ -169,7 +169,7 @@ void loop() {
         
 
         // Is accel-cache-data ready?
-        if ( accel2BufferReady ) {
+        if ( accel1BufferReady && accel2BufferReady ) {
 
             debugPrint("Accel-buffer ready. Filling SD-cache...");
             readAccelBuffer();
@@ -206,6 +206,9 @@ void loop() {
 
 
 void readAccelBuffer() {
+    /*
+    Reads and writes data from each accel-buffer.
+    */
     digitalWrite(A1_CS, LOW);
     digitalWrite(A2_CS, LOW);
     rawOutputData myRawData_1;
@@ -260,14 +263,14 @@ void initializeAccel(SparkFun_KX132_SPI &accel, byte csPin) {
     accel.enableAccel(false);
     accel.enableBufferInt();
     accel.enablePhysInterrupt();
-    accel.routeHardwareInterrupt(0x40);
-    accel.enableSampleBuffer();
-    accel.setBufferOperationMode(0x01);
+    accel.routeHardwareInterrupt(0x40); // Route to pin 1
+    accel.enableSampleBuffer(); 
+    accel.setBufferOperationMode(0x01); // Enables stream mode. 
     accel.setBufferThreshold(MAX_BUFFER_SAMPLES);
-    accel.setBufferResolution();
+    accel.setBufferResolution(); // Set resolution to 16 bit
     accel.clearBuffer();
     accel.setRange(SFE_KX132_RANGE16G);
-    accel.setOutputDataRate(0x0A);
+    accel.setOutputDataRate(0x0A); // Set ODR. 
     accel.enableAccel();
     delay(5);
     digitalWrite(csPin, HIGH);
