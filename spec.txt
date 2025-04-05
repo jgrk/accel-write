@@ -1,0 +1,15 @@
+Vinkel accel-tip: 	20-22 grader
+
+Höjd accel-tip: 	39 mm
+
+Höjd accel-bak: 	11 mm 
+
+
+
+Avstånd till bidning:
+
+	Accel-tip:	 
+
+	Accel-bak:
+
+

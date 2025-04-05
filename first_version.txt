@@ -1,0 +1,204 @@
+#include <SPI.h>
+#include "wiring_private.h"
+#include <SparkFun_KX13X.h>
+#include <RTClib.h>
+#include "SdFat.h"
+#include "sdios.h"
+
+#define BUFFER_SAMPLE_LIM 42
+#define DATA_BLOCK_SIZE (BUFFER_SAMPLE_LIM * 6)  // Each sample (X, Y, Z) is 6 bytes (16-bit)
+
+// Setup SPI bus for accels
+SPIClass accel_SPI(&sercom4, 4, A3, A2, SPI_PAD_0_SCK_1, SERCOM_RX_PAD_2); 
+SPISettings mySetting(2000000, MSBFIRST, SPI_MODE0);
+
+// Create two separate objects for your two accelerometers.
+SparkFun_KX132_SPI kxAccel1;
+SparkFun_KX132_SPI kxAccel2;
+
+SdFat sd; // SD File system
+SdFile file; // File object for writing data
+
+// File names
+const char fileName1[] = "accel1.dat";
+const char fileName2[] = "accel2.dat";
+const bool useSave = true;
+const bool logAccelData = true;
+
+// Data buffers
+volatile uint8_t DataOut1[DATA_BLOCK_SIZE]; 
+volatile uint8_t DataOut2[DATA_BLOCK_SIZE]; 
+volatile bool newDataReady1 = false;  
+volatile bool newDataReady2 = false;  
+
+// Pin definitions
+const byte A1CS = 0;  
+const byte A2CS = 1;
+const byte SDCS = 10;
+const byte AccelBufferINT1 = 5;
+const byte AccelBufferINT2 = 6;
+const int OUTPUT_DATA_RATE = 500;
+
+RTC_PCF8523 rtc; // Real Time Clock
+
+#define SPI_CLOCK SD_SCK_MHZ(2)
+#define SD_CONFIG SdSpiConfig(SDCS, SHARED_SPI, SPI_CLOCK)
+
+void setup() {
+    // Serial.begin(115200);
+    // while (!Serial) { }
+
+    // Configure SPI chip select pins
+    pinMode(A1CS, OUTPUT);
+    pinMode(A2CS, OUTPUT);
+    digitalWrite(A1CS, HIGH);
+    digitalWrite(A2CS, HIGH);
+
+    // Initialize SPI
+    accel_SPI.begin();
+    pinPeripheral(4, PIO_SERCOM_ALT);
+    pinPeripheral(A3, PIO_SERCOM_ALT);
+    pinPeripheral(A2, PIO_SERCOM_ALT);
+    delay(500);
+    accel_SPI.beginTransaction(mySetting);
+    delay(10);
+    accel_SPI.endTransaction();
+
+    // Initialize first accelerometer
+    if (!kxAccel1.begin(accel_SPI, mySetting, A1CS)) {
+        // Serial.println("KX132 #1 communication error!");
+        while (1);
+    }
+    initializeAccel(kxAccel1, A1CS);
+
+    // Initialize second accelerometer
+    if (!kxAccel2.begin(accel_SPI, mySetting, A2CS)) {
+        // Serial.println("KX132 #2 communication error!");
+        while (1);
+    }
+    initializeAccel(kxAccel2, A2CS);
+
+    // Serial.println("Both accelerometers initialized.");
+
+    // Initialize SD card
+    if (!sd.begin(SD_CONFIG)) {
+        // Serial.println("SD Card init failed. Freezing.");
+        while (1);
+    }
+    // Serial.println("SD Card initialized.");
+
+    // Create contiguous files
+    createDataFile(fileName1);
+    createDataFile(fileName2);
+
+    // Initialize RTC
+    // if (!rtc.begin()) {
+    //    Serial.println("RTC not found.");
+    //    while (1);
+    //}
+
+    // Attach buffer interrupts
+    pinMode(AccelBufferINT1, INPUT_PULLUP);
+    pinMode(AccelBufferINT2, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(AccelBufferINT1), writeAccelData1, RISING);
+    attachInterrupt(digitalPinToInterrupt(AccelBufferINT2), writeAccelData2, RISING);
+
+    // Serial.println("Setup complete.");
+}
+
+void loop() {
+    if (newDataReady1) {
+        saveToSD(fileName1, DataOut1);
+        newDataReady1 = false;
+    }
+
+    if (newDataReady2) {
+        saveToSD(fileName2, DataOut2);
+        newDataReady2 = false;
+    }
+}
+
+void initializeAccel(SparkFun_KX132_SPI &accel, byte csPin) {
+    accel.enableAccel(false);
+    accel.enableBufferInt();            //  Enables the Buffer interrupt
+    accel.enablePhysInterrupt();        //  Enables interrupt pin 1
+    accel.routeHardwareInterrupt(0x40);
+    accel.enableSampleBuffer();
+    accel.setBufferOperationMode(0x01); // STREAM mode
+    accel.setBufferThreshold(BUFFER_SAMPLE_LIM);
+    accel.setBufferResolution();
+    accel.clearBuffer();
+    accel.setRange(SFE_KX132_RANGE16G);
+    accel.setOutputDataRate(0x0A);  
+    accel.enableAccel();
+    delay(5);
+    digitalWrite(csPin, HIGH);
+}
+
+// change O_TRUNC to O_APPEND to not overwrite
+void createDataFile(const char *filename) {
+    if (!file.open(filename, O_RDWR | O_CREAT | O_TRUNC)) {
+        //Serial.println("Failed to create file: " + String(filename));
+    } else {
+        //Serial.println("File ready: " + String(filename));
+        file.close();
+    }
+}
+
+void writeAccelData1() {
+    readAccelBuffer(kxAccel1, A1CS, DataOut1);
+    newDataReady1 = true;
+}
+
+void writeAccelData2() {
+    readAccelBuffer(kxAccel2, A2CS, DataOut2);
+    newDataReady2 = true;
+}
+
+void readAccelBuffer(SparkFun_KX132_SPI &accel, byte csPin, volatile uint8_t *buffer) {
+    digitalWrite(csPin, LOW);
+    rawOutputData myRawData;
+    accel.getRawAccelBufferData(&myRawData, 1);  // Dummy read
+
+    for (int i = 0; i < BUFFER_SAMPLE_LIM; i++) {
+        // write from accel buffer -> to atmel buffer
+        if (accel.getRawAccelBufferData(&myRawData, 1)) {
+            buffer[6 * i + 0] = lowByte(myRawData.xData);
+            buffer[6 * i + 1] = highByte(myRawData.xData);
+            buffer[6 * i + 2] = lowByte(myRawData.yData);
+            buffer[6 * i + 3] = highByte(myRawData.yData);
+            buffer[6 * i + 4] = lowByte(myRawData.zData);
+            buffer[6 * i + 5] = highByte(myRawData.zData);
+        }
+        
+        if (logAccelData){    
+            // Serial.print("Sample ");
+            // Serial.print(i);
+            // Serial.print(" -> X: ");
+            // Serial.print(myRawData.xData);
+            // Serial.print(", Y: ");
+            // Serial.print(myRawData.yData);
+            // Serial.print(", Z: ");
+            // Serial.println(myRawData.zData);
+        }
+        
+    }
+
+    digitalWrite(csPin, HIGH);
+}
+
+void saveToSD(const char *filename, volatile uint8_t *buffer) {
+    if (!file.open(filename, O_RDWR | O_APPEND)) {
+        //Serial.println("Failed to open file for writing: " + String(filename));
+        return;
+    }
+
+    // Cast `buffer` to `const uint8_t*` to match `write()` function signature
+    if (file.write((const uint8_t*)buffer, DATA_BLOCK_SIZE) != DATA_BLOCK_SIZE) {
+        //Serial.println("Error writing to file.");
+    } else {
+        // Serial.println("Data written to: " + String(filename));
+    }
+
+    file.close();
+}
