@@ -60,10 +60,10 @@ def main():
             plt.legend()
             plt.grid(True)
 
-            save_to_dir = f"{save_dir}{vals[1]}/{file.name.replace('dat', 'png')}"
+            save_to_dir = f"{save_dir}{vals[1]}/"
             if not os.path.exists(save_to_dir):
                 os.makedirs(save_to_dir)
-            plt.savefig(save_to_dir)
+            plt.savefig(f"{save_to_dir}{file.name.replace('dat', 'png')}")
 
 
 if __name__ == "__main__":
