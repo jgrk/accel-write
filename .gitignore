@@ -3,4 +3,5 @@ fft/
 second_version
 second_version.ino
 tmp/
+.venv/
 
