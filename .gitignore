@@ -4,4 +4,5 @@ second_version
 second_version.ino
 tmp/
 .venv/
-
+.idea/
+__pycache__/
