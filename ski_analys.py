@@ -28,6 +28,9 @@ def _load_csv(file_name: str):
         print(f"Error loading CSV file: {e}")
         return None
 
+def statistic_1(asdasd):
+    # run statistics
+
 
 def fft(data_path = "data/", save_path = "fft/", freq_lim = None, scaling = False):
     """
@@ -91,5 +94,5 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default=data_dir, help="Path to the data directory")
     parser.add_argument("--save_dir", type=str, default=save_dir, help="Path to the directory where the results will be saved")
     parser.add_argument("--freq_lim", type=int, default=None, help="Frequency limit for the FFT results")
-    parser.add_argument("")
-    parser.add_argument()
+
+
