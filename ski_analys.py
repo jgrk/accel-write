@@ -4,12 +4,15 @@ Results are dB-scaled
 """
 # TODO: add so that the second accel is treated accordingly to its angle to the plane
 
-
+from typing import Iterable
 
 import argparse
 import os
 import numpy as np
 import pathlib
+
+from numpy import ndarray
+
 from readData import convert_dat_to_csv
 from matplotlib import pyplot as plt
 
@@ -19,7 +22,7 @@ save_dir = "fft/"
 dt = 1/sampling_rate # time between samples
 
 
-def _load_csv(file_name: str):
+def load_csv(file_name: str):
     """Load CSV file and return the data."""
     try:
         data = np.loadtxt(file_name, delimiter=',', skiprows=1)
@@ -28,8 +31,26 @@ def _load_csv(file_name: str):
         print(f"Error loading CSV file: {e}")
         return None
 
-def statistic_1(asdasd):
-    # run statistics
+
+def stack_data(accel_data:Iterable[ndarray[float]]):
+    """
+    Takes simultaneously generated accel data records of different sizes and
+    stacks them into a single numpy array by interpolation.
+
+    accel_data: Array of simultaneously generated accel data records.
+    returns: Stacked numpy array.
+    """
+
+    N = 0
+    for record in accel_data:
+        if record.size > N:
+            N = record.size
+
+    for record in accel_data:
+        if record.size < N:
+
+
+
 
 
 def fft(data_path = "data/", save_path = "fft/", freq_lim = None, scaling = False):
@@ -94,5 +115,6 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default=data_dir, help="Path to the data directory")
     parser.add_argument("--save_dir", type=str, default=save_dir, help="Path to the directory where the results will be saved")
     parser.add_argument("--freq_lim", type=int, default=None, help="Frequency limit for the FFT results")
+    parser.add_argument("")
 
 
