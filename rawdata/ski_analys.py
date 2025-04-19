@@ -5,20 +5,18 @@ Results are dB-scaled
 
 # TODO: add so that the second accel is treated accordingly to its angle to the plane
 
-from typing import Iterable, Callable, Any
+from typing import Iterable, Callable
 
 import argparse
 import os
 import numpy as np
 import pathlib
-import re
-import logging
 
 import pandas as pd
 from numpy import ndarray
-from scipy.signal import savgol_filter, envelope, find_peaks
+from scipy.signal import savgol_filter
 
-
+from dispPlotData import SAMPLE_RATE
 from readData import convert_dat_to_csv
 from matplotlib import pyplot as plt
 
@@ -26,9 +24,6 @@ sampling_rate = 800  # data from accel generated with a rate of 800 Hz
 data_dir = "data/"
 save_dir = "fft/"
 dt = 1 / sampling_rate  # time between samples
-coords = ('x', 'y', 'z')
-logger = logging.getLogger(__file__)
-logger.setLevel(logging.INFO)
 
 
 def load_csv(file_name: str):
@@ -39,13 +34,6 @@ def load_csv(file_name: str):
     except Exception as e:
         print(f"Error loading CSV file: {e}")
         return None
-
-
-def simple_segmentation(data: np.array, params):
-    """
-    Split data into segments.
-    """
-    return np.split(data, params['n_splits'])
 
 
 def stack_data(accel_data: Iterable[ndarray[float]]):
@@ -67,95 +55,72 @@ def stack_data(accel_data: Iterable[ndarray[float]]):
             pass
 
 
-def envelope_enhancer(data: ndarray[float], n_out = 100, width = (2, 5)):
-    """
-
-    the standard enhancer utilizes scipy envelope to wrap the data into a smooth function.
-    after enveloping, segments are found by local maxima.
-    """
-    env, res = envelope(z=data, n_out=n_out)
-    env = env + res
-    peak_indices, props = find_peaks(env, width=width)
-    left_bases = props['left_bases']
-    right_bases = props['right_bases']
-    adj_left_bases = left_bases*int(data.size/n_out) # should be an int right?
-    adj_right_bases = right_bases*int(data.size/n_out)
-    return [data[x0:x1] for x0, x1 in zip(adj_left_bases, adj_right_bases)]
+def std_enhancer():
+    pass
 
 
-
-def savgol_helper(data: ndarray[Any], params):
-    """
-    savgol wrapper for enhanced_fft.
-    When passing savgol_helper to enhanced_fft, make sure to include required kwargs!
-    Se required kwargs below.
-    """
-    try:
-        return savgol_filter(
-            x=data,
-            window_length=params['window_length'],
-            polyorder=params['polyorder'],
-            axis=params['axis'],
-        )
-
-    except ValueError as e:
-        print("savgol filter has missing args")
+def for_all_files(directory: str):
+    def decorator(func: Callable):
+        def wrapper(*args, **kwargs):
+            # TODO: loop over all files in directory and run func
+            for filename in os.listdir(directory):
+            result = func(*args, **kwargs)
 
 
+            # do something with results
+
+        return wrapper
+    return decorator
+
+def savgol_helper(data: ndarray[float], kwargs):
+    return savgol_filter(
+        x=data,
+        window_length=kwargs["window_length"],
+        polyorder=kwargs["order"],
+        axis=kwargs["axis"],
+    )
+
+
+@for_all_files
 def enhanced_fft(
-    file: str | pathlib.Path = None,
-    save_path: str = "enhanced_fft",
-    enhance_method: Callable[[Iterable[float], ...], Iterable[np.array]] = simple_segmentation,
+    file_dir: str = None,
+    save_path: str = "enhanced_fft/",
+    time_frame: float = 0.5,
+    enhance_method: Callable[[Iterable[float], ...], Iterable[np.array]] = std_enhancer,
     freq_lim: int = None,
-    filter: Callable[[ndarray[Any], ...], Any] = None,
+    filter: Callable[..., Iterable[float]] = None,
     **kwargs,
 ):
     """
-    Performs enhanced FFT on file and saves it to disk.
-    Enhance method is used to segment accel data.
-    Pass a filter to smoothen out the data
-
-    Run this over all records to systematically perform FFT with filer applied.
-
-    :param file: Project relative path to file.
-    :param save_path: Project dir to save to.
-    :param enhance_method: A function that takes data and kwargs, segments that data and returns the set of segments.
-    :param freq_lim: Frequency limit for segments.
-    :param filter: Function must take ndarray[float] and kwargs and return filtered data.
+    Perform enhanced FFT
     """
-    if file is None:
-        raise ValueError("arg file cannot be None")
 
-    params = kwargs
+    if file_dir is None:
+        raise ValueError("file_dir cannot be None")
 
-    if isinstance(file, str):
-        file = pathlib.Path(file)
-
-    ids = re.findall(r'\d+', file.name)
-    accel = ids[0]
-    record = ids[1]
-    data = np.loadtxt(file, delimiter=",", skiprows=1)
+    data = np.loadtxt(file_dir, delimiter=",", skiprows=1)
 
     if filter is not None:
-        data = filter(data, params)
+        data = filter(data, kwargs)
 
-    for idx, col in enumerate(data.T[:3]):
-        coord = coords[idx]
-        # for each coordinate, segment apropriatly
-        enhanced_data = enhance_method(col, params)
-        for j, sub_data in enumerate(enhanced_data):
+    # for each coordinate, segment apropriatly
+    for col in data.T:
+        enhanced_data = enhance_method(col, kwargs)
+        for sub_data in enhanced_data:
             # perform FFT on sub_data
             if freq_lim is None:
                 freq_lim = sub_data.size // 2
-            fft = np.fft.fft(sub_data)[:freq_lim]
             freqs = np.fft.fftfreq(sub_data.size, d=dt)[:freq_lim]
-            mag = np.abs(fft)
-            save_str = f'{save_path}/{enhance_method.__name__}/record_{record}/ac_{accel}/{coord}/'
-            if not os.path.exists(save_str):
-                os.makedirs(save_str)
-            save_str = save_str + f"part_{j}.csv"
-            combined = np.column_stack((freqs, mag))
-            np.savetxt(save_str, combined, delimiter=",", header = "freq,mag"),
+            # TODO: add coordinate meta info, structured saved functionality.
+
+
+def simple_segmentation(data: np.array, kwargs: dict):
+    """
+    Split data into segments.
+    """
+    if "n_splits" not in kwargs:
+        kwargs["n_splits"] = 1
+    return np.split(data, kwargs["n_splits"])
 
 
 def fft(data_path="data/", save_path="fft/", freq_lim=None, scaling=False):
