@@ -2,7 +2,8 @@
 Script intended for a basic fast-fourier-transform (FFT).
 Results are dB-scaled
 """
-
+import dataclasses
+import weakref
 # TODO: add so that the second accel is treated accordingly to its angle to the plane
 
 from typing import Iterable, Callable, Any
@@ -16,19 +17,33 @@ import logging
 
 import pandas as pd
 from numpy import ndarray
-from scipy.signal import savgol_filter, envelope, find_peaks
+from scipy.signal import savgol_filter, envelope, find_peaks, detrend, windows
 
 
 from readData import convert_dat_to_csv
 from matplotlib import pyplot as plt
+from dataclasses import dataclass
 
 sampling_rate = 800  # data from accel generated with a rate of 800 Hz
 data_dir = "data/"
 save_dir = "fft/"
 dt = 1 / sampling_rate  # time between samples
-coords = ('x', 'y', 'z')
+coords = ("x", "y", "z")
 logger = logging.getLogger(__file__)
 logger.setLevel(logging.INFO)
+_records = weakref.WeakValueDictionary()
+
+
+class DataRecord:
+    def __init__(self, path_str:str):
+        x=path_str.split("/")
+        self.root: str = x[0]
+        self.method: str = x[1]
+        self.record: str = x[2]
+        self.accel: str = x[3]
+        self.coord: str = x[4]
+        self.part: str = x[5]
+        self.skier: str = "Hanna" if int(self.record.strip("record_")) < 10 else "Erik"
 
 
 def load_csv(file_name: str):
@@ -45,7 +60,7 @@ def simple_segmentation(data: np.array, params):
     """
     Split data into segments.
     """
-    return np.split(data, params['n_splits'])
+    return np.split(data, params["n_splits"])
 
 
 def stack_data(accel_data: Iterable[ndarray[float]]):
@@ -67,21 +82,21 @@ def stack_data(accel_data: Iterable[ndarray[float]]):
             pass
 
 
-def envelope_enhancer(data: ndarray[float], n_out = 100, width = (2, 5)):
+def envelope_enhancer(data: np.array, params):
     """
-
     the standard enhancer utilizes scipy envelope to wrap the data into a smooth function.
     after enveloping, segments are found by local maxima.
     """
+    n_out = params["n_out"]
+    width = params["width"]
     env, res = envelope(z=data, n_out=n_out)
     env = env + res
     peak_indices, props = find_peaks(env, width=width)
-    left_bases = props['left_bases']
-    right_bases = props['right_bases']
-    adj_left_bases = left_bases*int(data.size/n_out) # should be an int right?
-    adj_right_bases = right_bases*int(data.size/n_out)
+    left_bases = props["left_bases"]
+    right_bases = props["right_bases"]
+    adj_left_bases = left_bases * int(data.size / n_out)  # should be an int right?
+    adj_right_bases = right_bases * int(data.size / n_out)
     return [data[x0:x1] for x0, x1 in zip(adj_left_bases, adj_right_bases)]
-
 
 
 def savgol_helper(data: ndarray[Any], params):
@@ -93,9 +108,9 @@ def savgol_helper(data: ndarray[Any], params):
     try:
         return savgol_filter(
             x=data,
-            window_length=params['window_length'],
-            polyorder=params['polyorder'],
-            axis=params['axis'],
+            window_length=params["window_length"],
+            polyorder=params["polyorder"],
+            axis=params["axis"],
         )
 
     except ValueError as e:
@@ -105,9 +120,12 @@ def savgol_helper(data: ndarray[Any], params):
 def enhanced_fft(
     file: str | pathlib.Path = None,
     save_path: str = "enhanced_fft",
-    enhance_method: Callable[[Iterable[float], ...], Iterable[np.array]] = simple_segmentation,
+    enhance_method: Callable[
+        [Iterable[float], ...], Iterable[np.array]
+    ] = simple_segmentation,
     freq_lim: int = None,
     filter: Callable[[ndarray[Any], ...], Any] = None,
+    detrending: bool = False,
     **kwargs,
 ):
     """
@@ -126,95 +144,56 @@ def enhanced_fft(
     if file is None:
         raise ValueError("arg file cannot be None")
 
+
     params = kwargs
 
     if isinstance(file, str):
         file = pathlib.Path(file)
 
-    ids = re.findall(r'\d+', file.name)
+    ids = re.findall(r"\d+", file.name)
     accel = ids[0]
     record = ids[1]
-    data = np.loadtxt(file, delimiter=",", skiprows=1)
+    data: ndarray = np.loadtxt(file, delimiter=",", skiprows=1)
 
-    if filter is not None:
+    if detrending:
+        data = detrend(data, axis=0)
+        window_length = data.shape[0]
+        window = windows.hann(window_length)
+        data = data * window[:, np.newaxis]
+
+    if filter:
         data = filter(data, params)
+
 
     for idx, col in enumerate(data.T[:3]):
         coord = coords[idx]
+
         # for each coordinate, segment apropriatly
         enhanced_data = enhance_method(col, params)
         for j, sub_data in enumerate(enhanced_data):
             # perform FFT on sub_data
             if freq_lim is None:
-                freq_lim = sub_data.size // 2
+                freq_lim = sub_data.shape[0] // 2
             fft = np.fft.fft(sub_data)[:freq_lim]
-            freqs = np.fft.fftfreq(sub_data.size, d=dt)[:freq_lim]
+            freqs = np.fft.fftfreq(sub_data.shape[0], d=dt)[:freq_lim]
             mag = np.abs(fft)
-            save_str = f'{save_path}/{enhance_method.__name__}/record_{record}/ac_{accel}/{coord}/'
+            save_str = f"{save_path}/{enhance_method.__name__}/record_{record}/ac_{accel}/{coord}/"
             if not os.path.exists(save_str):
                 os.makedirs(save_str)
             save_str = save_str + f"part_{j}.csv"
             combined = np.column_stack((freqs, mag))
-            np.savetxt(save_str, combined, delimiter=",", header = "freq,mag"),
+            np.savetxt(save_str, combined, delimiter=",", header="freq,mag"),
 
 
-def fft(data_path="data/", save_path="fft/", freq_lim=None, scaling=False):
+def fft(data_path="data/", **kwargs):
     """
-    Run FFT on all data records.
+    Run operations on all data records.
     data_path: path to the data directory
-    save_path: path to the directory where the results will be saved
-    freq_lim: frequency limit for the FFT results
     """
 
-    for file in pathlib.Path(data_path).glob("*.dat"):
-        dat_filename = f"{data_path}{file.name}"
-        convert_dat_to_csv(dat_filename)
-        csv_filename = f"{data_path}{file.name.replace('dat', 'csv')}"
-
-        data = np.loadtxt(csv_filename, delimiter=",", skiprows=1)
-        N = len(data)
-        if freq_lim is None:
-            freq_lim = len(data) // 2
-        else:
-            freq_lim = int((freq_lim / sampling_rate) * len(data))
-
-        freqs = np.fft.fftfreq(N, d=dt)[:freq_lim]  # freq > sampling_rate / 2
-
-        # FFT-vals
-        fft_x = np.fft.fft(data[:, 0])
-        fft_y = np.fft.fft(data[:, 1])
-        fft_z = np.fft.fft(data[:, 2])
-
-        mag_x = np.abs(fft_x)
-        mag_y = np.abs(fft_y)
-        mag_z = np.abs(fft_z)
-
-        if scaling:
-            mag_x = (
-                20 * np.log10(np.abs(fft_x) / np.max(np.abs(fft_x)) + 1e-12)[:freq_lim]
-            )  #
-            mag_y = (
-                20 * np.log10(np.abs(fft_y) / np.max(np.abs(fft_y)) + 1e-12)[:freq_lim]
-            )
-            mag_z = (
-                20 * np.log10(np.abs(fft_z) / np.max(np.abs(fft_z)) + 1e-12)[:freq_lim]
-            )
-
-        # saving results
-        for vals in [(mag_x, "x"), (mag_y, "y"), (mag_z, "z")]:
-            plt.figure(figsize=(10, 6))
-            plt.plot(freqs, vals[0], label=f"{vals[1]}-axis (g)")
-
-            plt.xlabel("Frequency (Hz)")
-            plt.ylabel("Magnitude (dB)")
-            plt.title("Accelerometer Data Frequency domain")
-            plt.legend()
-            plt.grid(True)
-
-            save_to_dir = f"{save_path}{vals[1]}/"
-            if not os.path.exists(save_to_dir):
-                os.makedirs(save_to_dir)
-            plt.savefig(f"{save_to_dir}{file.name.replace('dat', 'png')}")
+    for file in pathlib.Path(data_path).glob("*.csv"):
+        enhanced_fft(file, **kwargs)
+        pass
 
 
 def main():
