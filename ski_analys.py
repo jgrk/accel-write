@@ -14,6 +14,7 @@ import numpy as np
 import pathlib
 import re
 import logging
+import json
 
 import pandas as pd
 from numpy import ndarray
@@ -35,25 +36,16 @@ _records = weakref.WeakValueDictionary()
 
 
 class DataRecord:
-    def __init__(self, path_str:str):
-        x=path_str.split("/")
-        self.root: str = x[0]
-        self.method: str = x[1]
-        self.record: str = x[2]
-        self.accel: str = x[3]
-        self.coord: str = x[4]
-        self.part: str = x[5]
-        self.skier: str = "Hanna" if int(self.record.strip("record_")) < 10 else "Erik"
+    """
+    Struct for storing data and metadata
+    """
+    def __init__(self, json_file:str):
 
+        with open(json_file, 'r') as f:
+            json_data = json.load(f)
 
-def load_csv(file_name: str):
-    """Load CSV file and return the data."""
-    try:
-        data = np.loadtxt(file_name, delimiter=",", skiprows=1)
-        return data
-    except Exception as e:
-        print(f"Error loading CSV file: {e}")
-        return None
+        self.metadata = json_data["metadata"]
+        self.data = json_data["data"]
 
 
 def simple_segmentation(data: np.array, params):
@@ -61,25 +53,6 @@ def simple_segmentation(data: np.array, params):
     Split data into segments.
     """
     return np.split(data, params["n_splits"])
-
-
-def stack_data(accel_data: Iterable[ndarray[float]]):
-    """
-    Takes simultaneously generated accel data records of different sizes and
-    stacks them into a single numpy array by interpolation.
-
-    accel_data: Array of simultaneously generated accel data records.
-    returns: Stacked numpy array.
-    """
-
-    N = 0
-    for record in accel_data:
-        if record.size > N:
-            N = record.size
-
-    for record in accel_data:
-        if record.size < N:
-            pass
 
 
 def envelope_enhancer(data: np.array, params):
@@ -119,7 +92,7 @@ def savgol_helper(data: ndarray[Any], params):
 
 def enhanced_fft(
     file: str | pathlib.Path = None,
-    save_path: str = "enhanced_fft",
+    save_path: str = "enhanced_fft/",
     enhance_method: Callable[
         [Iterable[float], ...], Iterable[np.array]
     ] = simple_segmentation,
@@ -177,12 +150,25 @@ def enhanced_fft(
             fft = np.fft.fft(sub_data)[:freq_lim]
             freqs = np.fft.fftfreq(sub_data.shape[0], d=dt)[:freq_lim]
             mag = np.abs(fft)
-            save_str = f"{save_path}/{enhance_method.__name__}/record_{record}/ac_{accel}/{coord}/"
-            if not os.path.exists(save_str):
-                os.makedirs(save_str)
-            save_str = save_str + f"part_{j}.csv"
+            save_str = f"{enhance_method.__name__}-record_{record}-ac_{accel}-{coord}-part_{j}.json"
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
             combined = np.column_stack((freqs, mag))
-            np.savetxt(save_str, combined, delimiter=",", header="freq,mag"),
+            json_data = {
+                "metadata": {
+                    "coord": coord,
+                    "record": record,
+                    "accel": accel,
+                    "part": j,
+                    **params
+                },
+
+                "data": combined.tolist(),
+
+            }
+            with open(save_path+save_str, "w") as f:
+                json.dump(json_data, f)
+            # np.savetxt(save_str, combined, delimiter=",", header="freq,mag"),
 
 
 def fft(data_path="data/", **kwargs):
