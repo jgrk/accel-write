@@ -62,13 +62,14 @@ def envelope_enhancer(data: np.array, params):
     """
     n_out = params["n_out"]
     width = params["width"]
+    prominance = params["prominence"]
     env, res = envelope(z=data, n_out=n_out)
     env = env + res
-    peak_indices, props = find_peaks(env, width=width)
-    left_bases = props["left_bases"]
-    right_bases = props["right_bases"]
-    adj_left_bases = left_bases * int(data.size / n_out)  # should be an int right?
-    adj_right_bases = right_bases * int(data.size / n_out)
+    peak_indices, props = find_peaks(env, width=width, prominence=prominance)
+    left_bases = props["left_ips"]
+    right_bases = props["right_ips"]
+    adj_left_bases = left_bases * int(data.shape[0] / n_out)  # should be an int right?
+    adj_right_bases = right_bases * int(data.shape[0] / n_out)
     return [data[x0:x1] for x0, x1 in zip(adj_left_bases, adj_right_bases)]
 
 
