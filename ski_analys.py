@@ -45,15 +45,46 @@ class DataRecord:
             json_data = json.load(f)
 
         self.metadata = json_data["metadata"]
-        self.data = json_data["data"]
+        self.n = len(json_data["data"])
+        self.data = json_data["data"][:self.n//2]
+        self.freqs, self.mags = zip(*self.data)
+
+        self.record = self.metadata["record"]
+        self.coord = self.metadata["coord"]
+        self.accel = self.metadata["accel"]
+        self.part = self.metadata["part"]
+
+
+    @property
+    def freq_peak(self):
+        freq, mag = zip(*self.data[5:])  # skip first points
+        idx = np.argmax(mag)
+        return freq[idx]
+
+    def peaks(self, **kwargs):
+        """
+        Find peaks in the data
+        """
+        return_vals = find_peaks(self.mags[5:], **kwargs)
+        return return_vals
 
 
 def simple_segmentation(data: np.array, params):
     """
     Split data into segments.
     """
-    return np.split(data, params["n_splits"])
+    return np.array_split(data, params["n_splits"])
 
+def correlation_segmemntation(ref, data, params):
+    """
+    Split data into segments based on correlation with reference data.
+    """
+    n_splits = params["n_splits"]
+    corr = np.correlate(data, ref, mode="full")
+    corr = corr / np.max(corr)
+    split_points = np.linspace(0, len(corr), n_splits + 1).astype(int)
+    segments = [corr[split_points[i]:split_points[i + 1]] for i in range(n_splits)]
+    return segments
 
 def envelope_enhancer(data: np.array, params):
     """
@@ -66,8 +97,8 @@ def envelope_enhancer(data: np.array, params):
     env, res = envelope(z=data, n_out=n_out)
     env = env + res
     peak_indices, props = find_peaks(env, width=width, prominence=prominance)
-    left_bases = props["left_ips"]
-    right_bases = props["right_ips"]
+    left_bases = props["left_ips"].round().astype(int)
+    right_bases = props["right_ips"].round().astype(int)
     adj_left_bases = left_bases * int(data.shape[0] / n_out)  # should be an int right?
     adj_right_bases = right_bases * int(data.shape[0] / n_out)
     return [data[x0:x1] for x0, x1 in zip(adj_left_bases, adj_right_bases)]
