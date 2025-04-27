@@ -48,7 +48,6 @@ class DataRecord:
         self.n = len(json_data["data"])
         self.data = json_data["data"][:self.n//2]
         self.freqs, self.mags = zip(*self.data)
-
         self.record = self.metadata["record"]
         self.coord = self.metadata["coord"]
         self.accel = self.metadata["accel"]
@@ -86,22 +85,25 @@ def correlation_segmemntation(ref, data, params):
     segments = [corr[split_points[i]:split_points[i + 1]] for i in range(n_splits)]
     return segments
 
-def envelope_enhancer(data: np.array, params):
+
+def envelope_enhancer(data: np.array, params) -> list[tuple[Any, tuple[Any, Any]]]:
     """
     the standard enhancer utilizes scipy envelope to wrap the data into a smooth function.
     after enveloping, segments are found by local maxima.
     """
+    n = data.shape[0]
     n_out = params["n_out"]
-    width = params["width"]
-    prominance = params["prominence"]
+    k = n/n_out
+    width = [np.ceil(x/k) for x in params["width"]]
+    prominence = params["prominence"]
     env, res = envelope(z=data, n_out=n_out)
     env = env + res
-    peak_indices, props = find_peaks(env, width=width, prominence=prominance)
+    peak_indices, props = find_peaks(env, width=width, prominence=prominence)
     left_bases = props["left_ips"].round().astype(int)
     right_bases = props["right_ips"].round().astype(int)
-    adj_left_bases = left_bases * int(data.shape[0] / n_out)  # should be an int right?
-    adj_right_bases = right_bases * int(data.shape[0] / n_out)
-    return [data[x0:x1] for x0, x1 in zip(adj_left_bases, adj_right_bases)]
+    adj_left_bases = left_bases * int(k)  # should be an int right?
+    adj_right_bases = right_bases * int(k)
+    return [(data[x0:x1], (x0,x1)) for x0, x1 in zip(adj_left_bases, adj_right_bases)]
 
 
 def savgol_helper(data: ndarray[Any], params):
@@ -160,6 +162,8 @@ def enhanced_fft(
     record = ids[1]
     data: ndarray = np.loadtxt(file, delimiter=",", skiprows=1)
 
+
+
     if detrending:
         data = detrend(data, axis=0)
         window_length = data.shape[0]
@@ -169,18 +173,22 @@ def enhanced_fft(
     if filter:
         data = filter(data, params)
 
+    index = np.arange(data.shape[0]) * 1 / sampling_rate
+    data = np.column_stack([index, data])
 
-    for idx, col in enumerate(data.T[:3]):
+    for idx, col in enumerate(data.T[1:4]):
         coord = coords[idx]
 
         # for each coordinate, segment apropriatly
         enhanced_data = enhance_method(col, params)
         for j, sub_data in enumerate(enhanced_data):
             # perform FFT on sub_data
+            segment = sub_data[0]
+            interv = sub_data[1]
             if freq_lim is None:
-                freq_lim = sub_data.shape[0] // 2
-            fft = np.fft.fft(sub_data)[:freq_lim]
-            freqs = np.fft.fftfreq(sub_data.shape[0], d=dt)[:freq_lim]
+                freq_lim = segment.shape[0] // 2
+            fft = np.fft.fft(segment)[:freq_lim]
+            freqs = np.fft.fftfreq(segment.shape[0], d=dt)[:freq_lim]
             mag = np.abs(fft)
             save_str = f"{enhance_method.__name__}-record_{record}-ac_{accel}-{coord}-part_{j}.json"
             if not os.path.exists(save_path):
@@ -192,6 +200,8 @@ def enhanced_fft(
                     "record": record,
                     "accel": accel,
                     "part": j,
+                    "start_idx": str(interv[0]),
+                    "stop_idx": str(interv[1]),
                     **params
                 },
 
