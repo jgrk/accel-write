@@ -1,9 +1,6 @@
 """
-Script intended for a basic fast-fourier-transform (FFT).
-Results are dB-scaled
+Tools for performing analysis on ski data.
 """
-import dataclasses
-import weakref
 # TODO: add so that the second accel is treated accordingly to its angle to the plane
 
 from typing import Iterable, Callable, Any
@@ -32,7 +29,6 @@ dt = 1 / sampling_rate  # time between samples
 coords = ("x", "y", "z")
 logger = logging.getLogger(__file__)
 logger.setLevel(logging.INFO)
-_records = weakref.WeakValueDictionary()
 
 
 class DataRecord:
@@ -52,6 +48,8 @@ class DataRecord:
         self.coord = self.metadata["coord"]
         self.accel = self.metadata["accel"]
         self.part = self.metadata["part"]
+        self.start_idx = self.metadata["start_idx"]
+        self.end_idx = self.metadata["end_idx"]
 
 
     @property
@@ -93,7 +91,11 @@ def envelope_enhancer(data: np.array, params) -> list[tuple[Any, tuple[Any, Any]
     """
     n = data.shape[0]
     n_out = params["n_out"]
-    k = n/n_out
+    k = int(np.ceil(n/n_out))  # int
+    if k < 400:
+        k = 400
+        n_out = int(np.ceil(n/k))
+
     width = [np.ceil(x/k) for x in params["width"]]
     prominence = params["prominence"]
     env, res = envelope(z=data, n_out=n_out)
@@ -103,13 +105,13 @@ def envelope_enhancer(data: np.array, params) -> list[tuple[Any, tuple[Any, Any]
     right_bases = props["right_ips"].round().astype(int)
     adj_left_bases = left_bases * int(k)  # should be an int right?
     adj_right_bases = right_bases * int(k)
-    return [(data[x0:x1], (x0,x1)) for x0, x1 in zip(adj_left_bases, adj_right_bases)]
+    return [(data[x0:x1], (x0, x1)) for x0, x1 in zip(adj_left_bases, adj_right_bases)]
 
 
 def savgol_helper(data: ndarray[Any], params):
     """
     savgol wrapper for enhanced_fft.
-    When passing savgol_helper to enhanced_fft, make sure to include required kwargs!
+    When passing savgol_helper to enhanced_fft make sure to include required kwargs!
     Se required kwargs below.
     """
     try:
@@ -201,7 +203,7 @@ def enhanced_fft(
                     "accel": accel,
                     "part": j,
                     "start_idx": str(interv[0]),
-                    "stop_idx": str(interv[1]),
+                    "end_idx": str(interv[1]),
                     **params
                 },
 
