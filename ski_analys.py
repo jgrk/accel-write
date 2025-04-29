@@ -72,6 +72,7 @@ def simple_segmentation(data: np.array, params):
     """
     return np.array_split(data, params["n_splits"])
 
+
 def correlation_segmemntation(ref, data, params):
     """
     Split data into segments based on correlation with reference data.
@@ -90,17 +91,20 @@ def envelope_enhancer(data: np.array, params) -> list[tuple[Any, tuple[Any, Any]
     after enveloping, segments are found by local maxima.
     """
     n = data.shape[0]
-    n_out = params["n_out"]
-    k = int(np.ceil(n/n_out))  # int
-    if k < 400:
-        k = 400
-        n_out = int(np.ceil(n/k))
-
-    width = [np.ceil(x/k) for x in params["width"]]
-    prominence = params["prominence"]
+    try:
+        n_out = params["n_out"]
+        height = params["height"]
+        k = int(np.ceil(n/n_out))  # int
+        if k < 400:
+            k = 400
+            n_out = int(np.ceil(n/k))
+        width = [np.ceil(x/k) for x in params["width"]]
+        prominence = params["prominence"]
+    except:
+        raise ValueError("Params n_out, width, prominence and height not all given")
     env, res = envelope(z=data, n_out=n_out)
     env = env + res
-    peak_indices, props = find_peaks(env, width=width, prominence=prominence)
+    peak_indices, props = find_peaks(env, width=width, prominence=prominence, height=height)
     left_bases = props["left_ips"].round().astype(int)
     right_bases = props["right_ips"].round().astype(int)
     adj_left_bases = left_bases * int(k)  # should be an int right?
