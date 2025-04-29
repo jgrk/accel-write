@@ -42,7 +42,7 @@ class DataRecord:
 
         self.metadata = json_data["metadata"]
         self.n = len(json_data["data"])
-        self.data = json_data["data"][:self.n//2]
+        self.data = json_data["data"]
         self.freqs, self.mags = zip(*self.data)
         self.record = self.metadata["record"]
         self.coord = self.metadata["coord"]
