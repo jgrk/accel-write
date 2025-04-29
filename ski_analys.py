@@ -136,7 +136,6 @@ def enhanced_fft(
     enhance_method: Callable[
         [Iterable[float], ...], Iterable[np.array]
     ] = simple_segmentation,
-    freq_lim: int = None,
     filter: Callable[[ndarray[Any], ...], Any] = None,
     detrending: bool = False,
     **kwargs,
@@ -191,8 +190,7 @@ def enhanced_fft(
             # perform FFT on sub_data
             segment = sub_data[0]
             interv = sub_data[1]
-            if freq_lim is None:
-                freq_lim = segment.shape[0] // 2
+            freq_lim = segment.shape[0] // 2
             fft = np.fft.fft(segment)[:freq_lim]
             freqs = np.fft.fftfreq(segment.shape[0], d=dt)[:freq_lim]
             mag = np.abs(fft)
